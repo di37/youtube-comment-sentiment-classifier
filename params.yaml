@@ -1,0 +1,22 @@
+data_ingestion:
+  test_size: 0.20
+  val_size: 0.10
+  random_state: 42
+  stratify_column: Sentiment
+
+model_building:
+  ngram_range: [1, 3]  
+  max_features: 10000
+  # Tree structure
+  n_estimators: 939
+  max_depth: 13
+  num_leaves: 113
+  min_child_samples: 79
+  # Learning Rate
+  learning_rate: 0.066816
+  # Sampling
+  colsample_bytree: 0.543358
+  subsample: 0.706715
+  # Regularization (very light)
+  reg_alpha: 0.000106
+  reg_lambda: 0.000346

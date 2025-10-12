@@ -1,0 +1,21 @@
+stages:
+  data_ingestion:
+    cmd: python data_handling/data_ingestion.py
+    deps:
+    - data_handling/data_ingestion.py
+    params:
+    - data_ingestion.test_size
+    - data_ingestion.val_size
+    - data_ingestion.random_state
+    - data_ingestion.stratify_column
+    outs:
+    - data/raw
+  
+  data_preprocessing:
+    cmd: python data_handling/data_preprocessing.py
+    deps:
+    - data/raw/train.csv
+    - data/raw/test.csv
+    - data_handling/data_preprocessing.py
+    outs:
+    - data/interim

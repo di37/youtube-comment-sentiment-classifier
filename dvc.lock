@@ -1,0 +1,42 @@
+schema: '2.0'
+stages:
+  data_ingestion:
+    cmd: python data_handling/data_ingestion.py
+    deps:
+    - path: data_handling/data_ingestion.py
+      hash: md5
+      md5: 6933958e8368f44fa62fc37d2a9b96be
+      size: 5015
+    params:
+      params.yaml:
+        data_ingestion.random_state: 42
+        data_ingestion.stratify_column: Sentiment
+        data_ingestion.test_size: 0.2
+        data_ingestion.val_size: 0.1
+    outs:
+    - path: data/raw
+      hash: md5
+      md5: 8d686b4920a555ad1c1a11d3d382c469.dir
+      size: 6977034
+      nfiles: 4
+  data_preprocessing:
+    cmd: python data_handling/data_preprocessing.py
+    deps:
+    - path: data/raw/test.csv
+      hash: md5
+      md5: 0dd65fb2a5a19e79693e4979ca73c931
+      size: 715919
+    - path: data/raw/train.csv
+      hash: md5
+      md5: 721b862f935c485fc5538bfde0bfe468
+      size: 2419681
+    - path: data_handling/data_preprocessing.py
+      hash: md5
+      md5: 4f8d050eba1c9d44d718083bd421aace
+      size: 8271
+    outs:
+    - path: data/interim
+      hash: md5
+      md5: d6691fff0acc8bf7b102bd8bc7f77ea0.dir
+      size: 2456128
+      nfiles: 3
