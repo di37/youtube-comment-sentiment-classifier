@@ -19,3 +19,39 @@ stages:
     - data_handling/data_preprocessing.py
     outs:
     - data/interim
+
+  model_building:
+    cmd: python model_creation/model_building.py
+    deps:
+    - data/interim/train_processed.csv
+    - model_creation/model_building.py
+    params:
+    - model_building.n_estimators
+    - model_building.max_depth
+    - model_building.num_leaves
+    - model_building.min_child_samples
+    - model_building.learning_rate
+    - model_building.colsample_bytree
+    - model_building.subsample
+    - model_building.reg_alpha
+    - model_building.reg_lambda
+    outs:
+    - lgbm_model.pkl
+    - tfidf_vectorizer.pkl
+
+  model_evaluation:
+    cmd: python model_creation/model_evaluation.py
+    deps:
+    - data/interim//train_processed.csv
+    - data/interim//test_processed.csv
+    - model_creation/model_evaluation.py
+    - lgbm_model.pkl
+    - tfidf_vectorizer.pkl
+    outs:
+    - experiment_info.json
+
+  model_registry:
+    cmd: python model_creation/register_model.py
+    deps:
+    - experiment_info.json
+    - model_creation/register_model.py

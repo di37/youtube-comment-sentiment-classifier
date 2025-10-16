@@ -11,7 +11,7 @@ model_building:
   n_estimators: 939
   max_depth: 13
   num_leaves: 113
-  min_child_samples: 79
+  min_child_samples: 78
   # Learning Rate
   learning_rate: 0.066816
   # Sampling

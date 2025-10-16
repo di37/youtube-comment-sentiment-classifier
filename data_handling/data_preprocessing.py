@@ -1,6 +1,7 @@
 import os, sys
 from os.path import dirname as up
 
+# Add parent directory to Python path to allow imports from utilities
 sys.path.append(os.path.abspath(os.path.join(up(__file__), os.pardir)))
 
 import numpy as np
@@ -38,7 +39,21 @@ nltk.download('stopwords')
 nltk.download('omw-1.4')  # For better lemmatization
 
 def preprocess_comment(comment):
-    """Apply preprocessing transformations to a comment."""
+    """Apply preprocessing transformations to a comment.
+    
+    This function cleans and normalizes a single comment by:
+    - Converting to lowercase
+    - Removing URLs
+    - Removing special characters and emojis
+    - Removing stopwords (except sentiment-critical ones)
+    - Lemmatizing words
+    
+    Args:
+        comment (str): Raw comment text
+        
+    Returns:
+        str: Cleaned and preprocessed comment
+    """
     try:
         # Convert to lowercase
         comment = comment.lower()
@@ -70,6 +85,72 @@ def preprocess_comment(comment):
     except Exception as e:
         logger.error(f"Error in preprocessing comment: {e}")
         return comment
+
+
+def process_comment_for_api(comment):
+    """Process a single comment and extract all features needed for model prediction.
+    
+    This function is designed for API usage where a single comment needs to be processed.
+    It extracts features from both the original and cleaned text.
+    
+    Args:
+        comment (str): Raw comment text from the user
+        
+    Returns:
+        dict: Dictionary containing:
+            - 'clean_comment': Preprocessed comment text
+            - 'word_count': Number of words in original comment
+            - 'num_stop_words': Number of stopwords in original comment
+            - 'num_chars': Number of characters in original comment
+            - 'num_chars_cleaned': Number of characters in cleaned comment
+            
+    Example:
+        >>> features = process_comment_for_api("This is a great video! 😊")
+        >>> print(features)
+        {
+            'clean_comment': 'great video',
+            'word_count': 6,
+            'num_stop_words': 3,
+            'num_chars': 25,
+            'num_chars_cleaned': 11
+        }
+    """
+    try:
+        # Validate input
+        if not isinstance(comment, str):
+            raise ValueError("Comment must be a string")
+        
+        if not comment or comment.strip() == '':
+            raise ValueError("Comment cannot be empty")
+        
+        # Extract features from original comment (before preprocessing)
+        original_comment = comment.strip()
+        word_count = len(original_comment.split())
+        
+        # Count stopwords in original comment
+        stop_words = set(stopwords.words('english')) - {'not', 'but', 'however', 'no', 'yet'}
+        num_stop_words = len([word for word in original_comment.split() if word in stop_words])
+        
+        num_chars = len(original_comment)
+        
+        # Apply preprocessing to clean the comment
+        clean_comment = preprocess_comment(original_comment)
+        
+        # Extract features from cleaned comment
+        num_chars_cleaned = len(clean_comment)
+        
+        # Return all features as a dictionary
+        return {
+            'clean_comment': clean_comment,
+            'word_count': word_count,
+            'num_stop_words': num_stop_words,
+            'num_chars': num_chars,
+            'num_chars_cleaned': num_chars_cleaned
+        }
+    
+    except Exception as e:
+        logger.error(f"Error in processing comment for API: {e}")
+        raise
 
 def feature_engineering(df, preprocess_comment) -> pd.DataFrame:
     """Apply preprocessing to the text data in the dataframe."""
@@ -193,7 +274,6 @@ def main():
     from utilities import RAW_DATA_PATH, INTERIM_DATA_PATH
     
     print(">>> Stage 2: Starting Data Preprocessing pipeline...")
-    
     # 1. Loading the data
     train_data = load_data(os.path.join(RAW_DATA_PATH, "train.csv"))
     val_data = load_data(os.path.join(RAW_DATA_PATH, "val.csv"))
