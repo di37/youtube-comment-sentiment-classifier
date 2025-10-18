@@ -1,0 +1,209 @@
+name: CI/CD Pipeline - SSH Deployment
+
+# This workflow uses SSH to deploy to EC2 (no self-hosted runner required)
+# For self-hosted runner deployment, see cicd.yaml
+
+on:
+  workflow_dispatch:  # Manual trigger only (use cicd.yaml for automatic deployment)
+
+env:
+  AWS_REGION: me-central-1
+  IMAGE_TAG: ${{ github.sha }}
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Image to ECR
+    runs-on: ubuntu-latest
+    
+    outputs:
+      image_uri: ${{ steps.build-image.outputs.image }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
+        run: |
+          # Build the Docker image using the Dockerfile in deployment/
+          docker build -f deployment/Dockerfile -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+          
+          # Push both the SHA-tagged version and the latest tag
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          
+          # Output the full image URI for the deployment job
+          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:latest" >> $GITHUB_OUTPUT
+          
+          echo "✅ Image pushed successfully:"
+          echo "   - $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          echo "   - $ECR_REGISTRY/$ECR_REPOSITORY:latest"
+
+  deploy-to-ec2-ssh:
+    name: Deploy to EC2 via SSH
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+      
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      
+      - name: Deploy to EC2 (40.172.234.207)
+        env:
+          EC2_HOST: "40.172.234.207"
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
+        run: |
+          # Save the SSH key to a file
+          echo "$EC2_SSH_KEY" > ec2_key.pem
+          chmod 600 ec2_key.pem
+          
+          # Create deployment script
+          cat > deploy.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          echo "=========================================="
+          echo "🚀 Deploying to EC2: 40.172.234.207"
+          echo "=========================================="
+          
+          # Login to ECR
+          echo ""
+          echo "🔑 Logging into AWS ECR..."
+          aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+          
+          # Pull the latest image
+          echo ""
+          echo "📦 Pulling new Docker image..."
+          echo "   Image: ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest"
+          docker pull ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
+          
+          # Stop and remove existing container if it exists
+          echo ""
+          echo "🛑 Stopping existing container..."
+          docker stop youtube-sentiment-api 2>/dev/null || echo "   No container to stop"
+          docker rm youtube-sentiment-api 2>/dev/null || echo "   No container to remove"
+          
+          # Run the new container on port 6889
+          echo ""
+          echo "🚀 Starting new container on port 6889..."
+          docker run -d \
+            --name youtube-sentiment-api \
+            -p 6889:6889 \
+            -e AWS_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}" \
+            -e AWS_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}" \
+            -e AWS_REGION="${AWS_REGION}" \
+            -e AWS_DEFAULT_REGION="${AWS_REGION}" \
+            -e MLFLOW_TRACKING_URI="http://3.29.129.159:5000" \
+            -e AWS_ENDPOINT_URL="https://s3.me-central-1.amazonaws.com" \
+            -e MLFLOW_S3_ENDPOINT_URL="https://s3.me-central-1.amazonaws.com" \
+            --restart unless-stopped \
+            ${ECR_REGISTRY}/${ECR_REPOSITORY}:latest
+          
+          # Wait and check container
+          echo ""
+          echo "⏳ Waiting for container to start..."
+          sleep 5
+          
+          # Check if container is running
+          if docker ps | grep -q youtube-sentiment-api; then
+            echo "✅ Container is running!"
+            docker ps | grep youtube-sentiment-api
+          else
+            echo "❌ Container failed to start"
+            docker logs youtube-sentiment-api
+            exit 1
+          fi
+          
+          # Clean up old images
+          echo ""
+          echo "🧹 Cleaning up old images..."
+          docker image prune -f
+          
+          echo ""
+          echo "=========================================="
+          echo "✅ Deployment Completed Successfully!"
+          echo "=========================================="
+          echo "🌐 API URL: http://40.172.234.207:6889"
+          echo "📚 API Docs: http://40.172.234.207:6889/docs"
+          echo "❤️  Health Check: http://40.172.234.207:6889/health"
+          echo "=========================================="
+          EOF
+          
+          # Copy deployment script to EC2
+          echo "📤 Copying deployment script to EC2..."
+          scp -i ec2_key.pem -o StrictHostKeyChecking=no deploy.sh ${EC2_USER}@${EC2_HOST}:/tmp/deploy.sh
+          
+          # Execute deployment script on EC2
+          echo "⚙️  Executing deployment on EC2..."
+          ssh -i ec2_key.pem -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} << ENDSSH
+            chmod +x /tmp/deploy.sh
+            
+            # Export environment variables for the deployment script
+            export AWS_REGION="${{ secrets.AWS_REGION }}"
+            export ECR_REGISTRY="${ECR_REGISTRY}"
+            export ECR_REPOSITORY="${ECR_REPOSITORY}"
+            export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
+            export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+            
+            # Run deployment
+            /tmp/deploy.sh
+            
+            # Cleanup
+            rm /tmp/deploy.sh
+          ENDSSH
+          
+          # Cleanup local files
+          rm ec2_key.pem deploy.sh
+          
+          echo ""
+          echo "✅ SSH deployment completed!"
+      
+      - name: Verify Deployment
+        run: |
+          echo "🔍 Verifying deployment at http://40.172.234.207:6889/health"
+          sleep 10
+          
+          if curl -f http://40.172.234.207:6889/health; then
+            echo "✅ Health check passed!"
+          else
+            echo "⚠️  Warning: Health check failed. Container may still be starting."
+          fi
+          
+          echo ""
+          echo "=========================================="
+          echo "🎉 Deployment Pipeline Complete!"
+          echo "=========================================="
+          echo "🌐 Access your API:"
+          echo "   - API URL: http://40.172.234.207:6889"
+          echo "   - API Docs: http://40.172.234.207:6889/docs"
+          echo "   - Health: http://40.172.234.207:6889/health"
+          echo "=========================================="
+

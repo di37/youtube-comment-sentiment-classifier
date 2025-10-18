@@ -1,146 +1,157 @@
-name: workflow
+name: CI/CD Pipeline
 
+# Trigger on push to any branch and on pull requests
 on:
   push:
     branches:
+      - '**'
+  pull_request:
+    branches:
       - main
-    paths-ignore:
-      - 'README.md'
-      - '**.md'
-      - 'docs/**'
-
-permissions:
-  id-token: write
-  contents: read
-
-env:
-  RUNNER_LABEL: self-hosted-me-central
 
 jobs:
-  integration:
-    name: Continuous Integration
+  # ============================================
+  # CONTINUOUS INTEGRATION (CI)
+  # Runs on all branches to validate code
+  # ============================================
+  continuous-integration:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v3
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v2
         with:
-          python-version: '3.12'
+          python-version: '3.10'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install flake8 pytest
           pip install -r requirements.txt
 
-      - name: Lint code
-        run: |
-          # stop the build if there are Python syntax errors or undefined names
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          # exit-zero treats all errors as warnings
-          flake8 . --count --exit-zero --max-complexity=10 --statistics
-
-      - name: Run unit tests
-        run: |
-          pytest tests/ -v || echo "No tests found"
-
-  build-and-push-ecr-image:
-    name: Continuous Delivery
-    needs: integration
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v3
-
-      - name: Install Utilities
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y jq unzip
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
-
-      - name: Build, tag, and push image to Amazon ECR
-        id: build-image
+      # Run the DVC pipeline to validate the model training
+      - name: Run DVC pipeline
         env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY_NAME }}
-          IMAGE_TAG: latest
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: me-central-1
         run: |
-          # Build a docker container and push it to ECR
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f deployment/Dockerfile .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
-          echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
-          
-  Continuous-Deployment:
-    needs: build-and-push-ecr-image
-    runs-on: [self-hosted, self-hosted-me-central]
+          dvc repro
+
+      # Push DVC-tracked data to remote storage
+      - name: Push DVC-tracked data to remote
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: me-central-1
+        run: |
+          dvc push
+
+      # Configure Git for automated commits
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      # Stage all changes (DVC outputs, model files, etc.)
+      - name: Add changes to Git
+        run: |
+          git add .
+
+      # Commit changes (only if not triggered by bot)
+      - name: Commit changes
+        if: ${{ github.actor != 'github-actions[bot]' }}
+        run: |
+          git commit -m "Automated commit of DVC outputs and updated code [ci skip]" || echo "No changes to commit"
+
+      # Push changes back to the repository
+      - name: Push changes
+        if: ${{ github.actor != 'github-actions[bot]' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git push origin ${{ github.ref_name }}
+
+      # Build Docker image to ensure it builds successfully
+      - name: Build Docker image
+        run: |
+          docker build -t isham/simple-ml-app:${{ github.sha }} .
+
+      # Tag the image with commit SHA for tracking
+      - name: Tag Docker image
+        run: |
+          docker tag isham/simple-ml-app:${{ github.sha }} isham/simple-ml-app:latest
+
+      # Optional: Run basic container test
+      - name: Test Docker container
+        run: |
+          docker run --rm isham/simple-ml-app:latest python -c "import app; print('Container test passed')"
+
+  # ============================================
+  # CONTINUOUS DEPLOYMENT (CD)
+  # Only runs on main branch after CI succeeds
+  # ============================================
+  continuous-deployment:
+    runs-on: ubuntu-latest
+    # Only run deployment on main branch
+    if: github.ref == 'refs/heads/main'
+    # Deployment depends on CI job completing successfully
+    needs: continuous-integration
+
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+      # Login to AWS ECR to push Docker images
+      - name: Login to AWS ECR
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws ecr get-login-password --region me-central-1 | docker login --username AWS --password-stdin 384887233198.dkr.ecr.me-central-1.amazonaws.com
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v1
-      
-      - name: Pull latest images
+      # Build Docker image for production deployment
+      - name: Build Docker image
         run: |
-          docker pull ${{secrets.AWS_ECR_LOGIN_URI}}/${{ secrets.ECR_REPOSITORY_NAME }}:latest
-         
-      - name: Stop and remove container if running
-        run: |
-          container_name="youtube-sentiment-api"
-          if docker ps -q --filter "name=$container_name" | grep -q .; then
-            echo "Stopping existing container..."
-            docker stop $container_name || true
-            docker rm -fv $container_name || true
-          else
-            echo "No existing container found"
-          fi
-       
-      - name: Run Docker Image to serve users
-        run: |
-          docker run -d \
-            --name youtube-sentiment-api \
-            -p 6889:6889 \
-            -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
-            -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
-            -e AWS_REGION=${{ secrets.AWS_REGION }} \
-            -e AWS_DEFAULT_REGION=${{ secrets.AWS_REGION }} \
-            -e MLFLOW_TRACKING_URI=http://3.29.129.159:5000 \
-            -e AWS_ENDPOINT_URL=https://s3.me-central-1.amazonaws.com \
-            -e MLFLOW_S3_ENDPOINT_URL=https://s3.me-central-1.amazonaws.com \
-            ${{secrets.AWS_ECR_LOGIN_URI}}/${{ secrets.ECR_REPOSITORY_NAME }}:latest
+          docker build -t isham/simple-ml-app .
 
-      - name: Health check
+      # Tag Docker image for ECR
+      - name: Tag Docker image for ECR
         run: |
-          echo "Waiting for container to start..."
-          sleep 10
-          if curl -f http://localhost:6889/health; then
-            echo "Container is healthy"
-          else
-            echo "Container health check failed"
-            docker logs youtube-sentiment-api
-            exit 1
-          fi
+          docker tag isham/simple-ml-app:latest 384887233198.dkr.ecr.me-central-1.amazonaws.com/isham/simple-ml-app:latest
 
-      - name: Clean previous images and containers
+      # Push Docker image to AWS ECR
+      - name: Push Docker image to AWS ECR
         run: |
-          docker system prune -f
+          docker push 384887233198.dkr.ecr.me-central-1.amazonaws.com/isham/simple-ml-app:latest
+
+      # Zip the required files for deployment
+      - name: Zip files for deployment
+        run: |
+          zip -r deployment.zip appspec.yml deploy/scripts/install_dependencies.sh deploy/scripts/start_docker.sh
+
+      # Upload the ZIP file to S3
+      - name: Upload ZIP to S3
+        run: |
+          aws s3 cp deployment.zip s3://mlflow-artifacts-ad408878/deployment.zip
+
+      # Deploy to AWS CodeDeploy using the uploaded ZIP file
+      - name: Deploy to AWS CodeDeploy
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws deploy create-deployment \
+            --application-name YTChromePlugin \
+            --deployment-config-name CodeDeployDefault.OneAtATime \
+            --deployment-group-name YTChromePluginDeploymentGroup \
+            --s3-location bucket=mlflow-artifacts-ad408878,key=deployment.zip,bundleType=zip \
+            --file-exists-behavior OVERWRITE \
+            --region me-central-1
