@@ -118,15 +118,39 @@ def load_models_and_vectorizer():
     # Load MLflow model
     try:
         logger.info("Loading model from MLflow Model Registry...")
-        mlflow.set_tracking_uri("http://3.29.129.159:5000/")
+        mlflow_tracking_uri = os.getenv('MLFLOW_TRACKING_URI', 'http://3.29.129.159:5000')
+        logger.info(f"Using MLflow tracking URI: {mlflow_tracking_uri}")
+        
+        # Configure MLflow
+        mlflow.set_tracking_uri(mlflow_tracking_uri)
+        
+        # Set S3 endpoint URL if using AWS
+        aws_endpoint = os.getenv('AWS_ENDPOINT_URL')
+        if aws_endpoint:
+            os.environ['MLFLOW_S3_ENDPOINT_URL'] = aws_endpoint
+        
+        # Test MLflow connection
+        try:
+            mlflow.search_experiments()
+            logger.info("Successfully connected to MLflow server")
+        except Exception as conn_err:
+            logger.error(f"Failed to connect to MLflow server: {conn_err}")
+            raise
         
         # Load the model with staging alias using sklearn flavor
         model_name = "yt_chrome_plugin_model"
         model_version = "latest"
-        mlflow_model = mlflow.sklearn.load_model(f"models:/{model_name}/{model_version}")
-        logger.info("✓ MLflow model loaded from Model Registry (staging)")
+        try:
+            mlflow_model = mlflow.sklearn.load_model(f"models:/{model_name}/{model_version}")
+            logger.info("✓ MLflow model loaded from Model Registry (staging)")
+        except Exception as model_err:
+            logger.error(f"Failed to load model {model_name}: {model_err}")
+            # Fallback to local model
+            logger.info("Attempting to use local model only...")
+            mlflow_model = None
+            
     except Exception as e:
-        logger.error(f"Error loading MLflow model: {e}")
+        logger.error(f"Error in MLflow setup: {e}")
         logger.warning("MLflow model endpoints will not be available")
 
 

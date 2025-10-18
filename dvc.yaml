@@ -36,8 +36,8 @@ stages:
     - model_building.reg_alpha
     - model_building.reg_lambda
     outs:
-    - lgbm_model.pkl
-    - tfidf_vectorizer.pkl
+    - models/lgbm_model.pkl
+    - models/tfidf_vectorizer.pkl
 
   model_evaluation:
     cmd: python model_creation/model_evaluation.py
@@ -45,8 +45,8 @@ stages:
     - data/interim//train_processed.csv
     - data/interim//test_processed.csv
     - model_creation/model_evaluation.py
-    - lgbm_model.pkl
-    - tfidf_vectorizer.pkl
+    - models/lgbm_model.pkl
+    - models/tfidf_vectorizer.pkl
     outs:
     - experiment_info.json
 
