@@ -146,8 +146,8 @@ def main():
                 mlflow.log_param(key, value)
             
             # Load model and vectorizer
-            model = load_model('lgbm_model.pkl')
-            vectorizer = load_vectorizer('tfidf_vectorizer.pkl')
+            model = load_model('models/lgbm_model.pkl')
+            vectorizer = load_vectorizer('models/tfidf_vectorizer.pkl')
 
             # Load test data for signature inference
             test_data = load_data('data/interim/test_processed.csv')
@@ -195,8 +195,8 @@ def main():
             
             # Also log model pickle file and vectorizer as artifacts
             logger.debug('Logging additional artifacts...')
-            # mlflow.log_artifact('lgbm_model.pkl')
-            mlflow.log_artifact('tfidf_vectorizer.pkl')
+            # mlflow.log_artifact('models/lgbm_model.pkl')
+            mlflow.log_artifact('models/tfidf_vectorizer.pkl')
             logger.debug('Additional artifacts logged')
             
             # Print model location for verification

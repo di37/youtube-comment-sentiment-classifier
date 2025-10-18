@@ -45,8 +45,9 @@ def apply_tfidf(train_data: pd.DataFrame, max_features: int, ngram_range: tuple)
 
         logger.debug(f"TF-IDF transformation complete. Train shape: {X_train_tfidf.shape}")
 
-        # Save the vectorizer in the root directory
-        with open(os.path.join('tfidf_vectorizer.pkl'), 'wb') as f:
+        # Save the vectorizer in the models directory
+        os.makedirs('models', exist_ok=True)
+        with open(os.path.join('models', 'tfidf_vectorizer.pkl'), 'wb') as f:
             pickle.dump(vectorizer, f)
 
         logger.debug('TF-IDF applied with trigrams and data transformed')
@@ -165,8 +166,8 @@ def main():
         # Train the LightGBM model using hyperparameters from params.yaml
         best_model = train_lgbm(X_train, y_train, n_estimators, max_depth, num_leaves, min_child_samples, learning_rate, colsample_bytree, subsample, reg_alpha, reg_lambda)
 
-        # Save the trained model in the root directory
-        save_model(best_model, 'lgbm_model.pkl')
+        # Save the trained model in the models directory
+        save_model(best_model, 'models/lgbm_model.pkl')
 
     except Exception as e:
         logger.error('Failed to complete the feature engineering and model building process: %s', e)

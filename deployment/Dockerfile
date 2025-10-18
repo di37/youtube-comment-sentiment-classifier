@@ -25,9 +25,6 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p models data/interim data/raw logs
 
-# Copy model files to root directory for compatibility
-RUN cp models/lgbm_model.pkl . && cp models/tfidf_vectorizer.pkl .
-
 # Expose port
 EXPOSE 6889
 

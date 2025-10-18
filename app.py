@@ -99,18 +99,18 @@ def load_models_and_vectorizer():
     
     # Load TF-IDF vectorizer (shared by both models)
     try:
-        with open('tfidf_vectorizer.pkl', 'rb') as f:
+        with open('models/tfidf_vectorizer.pkl', 'rb') as f:
             vectorizer = pickle.load(f)
-        logger.info("✓ TF-IDF vectorizer loaded from tfidf_vectorizer.pkl")
+        logger.info("✓ TF-IDF vectorizer loaded from models/tfidf_vectorizer.pkl")
     except Exception as e:
         logger.error(f"Error loading vectorizer: {e}")
         raise
     
     # Load local model
     try:
-        with open('lgbm_model.pkl', 'rb') as f:
+        with open('models/lgbm_model.pkl', 'rb') as f:
             local_model = pickle.load(f)
-        logger.info("✓ Local model loaded from lgbm_model.pkl")
+        logger.info("✓ Local model loaded from models/lgbm_model.pkl")
     except Exception as e:
         logger.error(f"Error loading local model: {e}")
         logger.warning("Local model endpoints will not be available")
@@ -169,7 +169,7 @@ async def root():
         "message": "YouTube Sentiment Analysis API",
         "version": "1.0.0",
         "models": {
-            "local": "Model from local disk (lgbm_model.pkl)",
+            "local": "Model from local disk (models/lgbm_model.pkl)",
             "mlflow": "Model from MLflow Model Registry (staging)"
         },
         "endpoints": {
@@ -242,7 +242,7 @@ async def predict_sentiment(request: CommentRequest):
     """
     Predict sentiment for a YouTube comment using LOCAL model.
     
-    This endpoint uses the model from local disk (lgbm_model.pkl).
+    This endpoint uses the model from local disk (models/lgbm_model.pkl).
     
     Args:
         request: CommentRequest containing the comment to analyze
@@ -282,7 +282,7 @@ async def batch_predict(request: BatchCommentRequest):
     """
     Predict sentiment for multiple comments using LOCAL model.
     
-    This endpoint uses the model from local disk (lgbm_model.pkl).
+    This endpoint uses the model from local disk (models/lgbm_model.pkl).
     
     Request format:
     {
