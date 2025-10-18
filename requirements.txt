@@ -40,7 +40,6 @@ colorama==0.4.6
 colorlog==6.9.0
 comm==0.2.3
 configobj==5.0.9
-contourpy==1.3.3
 cryptography==45.0.7
 cycler==0.12.1
 cyclopts==3.24.0
